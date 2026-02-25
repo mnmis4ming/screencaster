@@ -1,15 +1,13 @@
 import CoreImage
 import HaishinKit
-import MediaPlayer
 import ReplayKit
 import RTCHaishinKit
 import RTMPHaishinKit
 import VideoToolbox
 
 final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
-    private var slider: UISlider?
     private var session: (any Session)?
-    private var mixer = MediaMixer(captureSessionMode: .manual, multiTrackAudioMixingEnabled: true)
+    private var mixer = MediaMixer(captureSessionMode: .manual)
 
     // Rotation handling
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -58,6 +56,12 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
                 }
                 try await session?.stream.setAudioSettings(audioSettings)
 
+                // Configure audio mixer: single track for app audio
+                var audioMixerSettings = await mixer.audioMixerSettings
+                audioMixerSettings.tracks[0] = .default
+                audioMixerSettings.tracks[0]?.volume = 1.0
+                await mixer.setAudioMixerSettings(audioMixerSettings)
+
                 await mixer.startRunning()
 
                 if let session {
@@ -73,13 +77,6 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
             }
         }
 
-        // Hack to read system volume for adjusting app audio level
-        DispatchQueue.main.async {
-            let volumeView = MPVolumeView(frame: .zero)
-            if let slider = volumeView.subviews.compactMap({ $0 as? UISlider }).first {
-                self.slider = slider
-            }
-        }
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
@@ -118,20 +115,10 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
             }
 
         case .audioMic:
+            break
+        case .audioApp:
             if sampleBuffer.dataReadiness == .ready {
                 Task { await mixer.append(sampleBuffer, track: 0) }
-            }
-        case .audioApp:
-            Task { @MainActor in
-                if let volume = slider?.value {
-                    var audioMixerSettings = await mixer.audioMixerSettings
-                    audioMixerSettings.tracks[1] = .default
-                    audioMixerSettings.tracks[1]?.volume = volume * 0.5
-                    await mixer.setAudioMixerSettings(audioMixerSettings)
-                }
-            }
-            if sampleBuffer.dataReadiness == .ready {
-                Task { await mixer.append(sampleBuffer, track: 1) }
             }
         @unknown default:
             break
