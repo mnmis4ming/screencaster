@@ -1,0 +1,68 @@
+name: ScreenCaster
+options:
+  bundleIdPrefix: com.dayouxia
+  deploymentTarget:
+    iOS: "16.0"
+
+packages:
+  HaishinKit:
+    url: https://github.com/shogo4405/HaishinKit.swift
+    from: "2.0.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: QNVSECY5BT
+
+targets:
+  ScreenCaster:
+    type: application
+    platform: iOS
+    sources:
+      - path: ScreenCaster
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dayouxia.ScreenCaster
+        CODE_SIGN_ENTITLEMENTS: ScreenCaster/ScreenCaster.entitlements
+        INFOPLIST_FILE: ScreenCaster/Info.plist
+        GENERATE_INFOPLIST_FILE: true
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+    dependencies:
+      - target: ScreenCasterBroadcast
+        embed: true
+
+  ScreenCasterBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ScreenCasterBroadcast
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dayouxia.ScreenCaster.Broadcast
+        PRODUCT_NAME: ScreenCasterBroadcast
+        CODE_SIGN_ENTITLEMENTS: ScreenCasterBroadcast/ScreenCasterBroadcast.entitlements
+        INFOPLIST_FILE: ScreenCasterBroadcast/Info.plist
+        GENERATE_INFOPLIST_FILE: true
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+    dependencies:
+      - package: HaishinKit
+        product: HaishinKit
+      - package: HaishinKit
+        product: RTMPHaishinKit
+      - package: HaishinKit
+        product: RTCHaishinKit
+
+schemes:
+  ScreenCaster:
+    build:
+      targets:
+        ScreenCaster: all
+        ScreenCasterBroadcast: all
+    run:
+      config: Debug
+    archive:
+      config: Release
