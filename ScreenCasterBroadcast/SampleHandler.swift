@@ -14,6 +14,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private var rotatedBufferPool: CVPixelBufferPool?
     private var rotatedPoolSize: CGSize = .zero
     private var encoderConfigured = false
+    private var landscapeSize: CGSize = .zero
     private var proto: StreamProtocol = .rtmp
 
     override init() {
@@ -83,18 +84,16 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         switch sampleBufferType {
         case .video:
             let orientation = Self.orientation(from: sampleBuffer)
-            let needsRotation = (orientation != .up)
 
             // Configure encoder once — always use landscape dimensions
             if !encoderConfigured, let dimensions = sampleBuffer.formatDescription?.dimensions {
                 let w = CGFloat(dimensions.width)
                 let h = CGFloat(dimensions.height)
-                // Always landscape: wider side as width
-                let outputSize = CGSize(width: max(w, h), height: min(w, h))
+                landscapeSize = CGSize(width: max(w, h), height: min(w, h))
                 encoderConfigured = true
                 Task {
                     var videoSettings = await session?.stream.videoSettings
-                    videoSettings?.videoSize = outputSize
+                    videoSettings?.videoSize = landscapeSize
                     videoSettings?.profileLevel = kVTProfileLevel_H264_High_4_2 as String
                     videoSettings?.bitRate = SharedConfig.videoBitrateMbps * 1_000_000
                     videoSettings?.bitRateMode = .average
@@ -108,8 +107,8 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
                 }
             }
 
-            if needsRotation, let rotated = rotatedSampleBuffer(sampleBuffer, orientation: orientation) {
-                Task { await mixer.append(rotated) }
+            if let processed = processedVideoBuffer(sampleBuffer, orientation: orientation) {
+                Task { await mixer.append(processed) }
             } else {
                 Task { await mixer.append(sampleBuffer) }
             }
@@ -145,29 +144,52 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         return CGImagePropertyOrientation(rawValue: value.uint32Value) ?? .up
     }
 
-    /// Rotates the pixel buffer using CIImage (GPU-accelerated) and wraps it
-    /// back into a CMSampleBuffer with the original timing info preserved.
-    private func rotatedSampleBuffer(
+    /// Processes a video frame for the landscape output canvas.
+    /// - Portrait (.up): scales and centers with black pillarbox bars.
+    /// - Landscape (.left/.right): rotates to correct orientation.
+    private func processedVideoBuffer(
         _ sampleBuffer: CMSampleBuffer,
         orientation: CGImagePropertyOrientation
     ) -> CMSampleBuffer? {
-        guard let pixelBuffer = sampleBuffer.imageBuffer else { return nil }
+        guard let pixelBuffer = sampleBuffer.imageBuffer, landscapeSize != .zero else { return nil }
 
-        // Apply orientation transform via CIImage (GPU path).
-        // CIImage.oriented() converts FROM the given orientation TO .up (portrait),
-        // but our encoder expects landscape output. Swap left/right so the rotation
-        // goes in the correct direction for landscape.
-        let corrected: CGImagePropertyOrientation
-        switch orientation {
-        case .left:  corrected = .right
-        case .right: corrected = .left
-        default:     corrected = orientation
+        let ciImage: CIImage
+
+        if orientation == .up {
+            // Portrait: scale to fit landscape height, center with black bars
+            let src = CIImage(cvPixelBuffer: pixelBuffer)
+            let scale = landscapeSize.height / src.extent.height
+            var scaled = src.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            let offsetX = (landscapeSize.width - scaled.extent.width) / 2
+            scaled = scaled.transformed(by: CGAffineTransform(translationX: offsetX, y: 0))
+            let black = CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: landscapeSize))
+            ciImage = scaled.composited(over: black)
+        } else {
+            // Landscape: rotate. Swap left/right because oriented() converts TO .up,
+            // but we want landscape output.
+            let corrected: CGImagePropertyOrientation
+            switch orientation {
+            case .left:  corrected = .right
+            case .right: corrected = .left
+            default:     corrected = orientation
+            }
+            var img = CIImage(cvPixelBuffer: pixelBuffer)
+            img = img.oriented(corrected)
+            ciImage = img
         }
-        var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        ciImage = ciImage.oriented(corrected)
 
-        let outWidth = Int(ciImage.extent.width)
-        let outHeight = Int(ciImage.extent.height)
+        return renderToSampleBuffer(ciImage, targetSize: landscapeSize, timingSource: sampleBuffer)
+    }
+
+    /// Renders a CIImage into a new CMSampleBuffer at the given size,
+    /// preserving timing info from the source buffer.
+    private func renderToSampleBuffer(
+        _ ciImage: CIImage,
+        targetSize: CGSize,
+        timingSource: CMSampleBuffer
+    ) -> CMSampleBuffer? {
+        let outWidth = Int(targetSize.width)
+        let outHeight = Int(targetSize.height)
         let outSize = CGSize(width: outWidth, height: outHeight)
 
         // (Re)create pool when output dimensions change
@@ -186,25 +208,25 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
 
         guard let pool = rotatedBufferPool else { return nil }
 
-        var rotatedBuffer: CVPixelBuffer?
-        let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &rotatedBuffer)
-        guard status == kCVReturnSuccess, let rotatedBuffer else { return nil }
+        var outputBuffer: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &outputBuffer)
+        guard status == kCVReturnSuccess, let outputBuffer else { return nil }
 
-        // CIImage extent may have a non-zero origin after oriented(); shift to (0,0)
-        let translated = ciImage.transformed(
+        // Normalize extent origin to (0,0) before rendering
+        let normalized = ciImage.transformed(
             by: CGAffineTransform(translationX: -ciImage.extent.origin.x,
                                   y: -ciImage.extent.origin.y)
         )
-        ciContext.render(translated, to: rotatedBuffer)
+        ciContext.render(normalized, to: outputBuffer)
 
         // Wrap in a new CMSampleBuffer with original timing
         var timingInfo = CMSampleTimingInfo()
-        CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo)
+        CMSampleBufferGetSampleTimingInfo(timingSource, at: 0, timingInfoOut: &timingInfo)
 
         var formatDescription: CMFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(
             allocator: nil,
-            imageBuffer: rotatedBuffer,
+            imageBuffer: outputBuffer,
             formatDescriptionOut: &formatDescription
         )
         guard let formatDescription else { return nil }
@@ -212,7 +234,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         var newSampleBuffer: CMSampleBuffer?
         CMSampleBufferCreateForImageBuffer(
             allocator: nil,
-            imageBuffer: rotatedBuffer,
+            imageBuffer: outputBuffer,
             dataReady: true,
             makeDataReadyCallback: nil,
             refcon: nil,

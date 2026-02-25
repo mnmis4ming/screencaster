@@ -1,6 +1,6 @@
 import Foundation
 
-enum StreamProtocol {
+enum StreamProtocol: Equatable {
     case rtmp
     case whip
 
