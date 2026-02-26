@@ -1,177 +1,312 @@
 import SwiftUI
 
+// MARK: - Theme
+
+enum Theme {
+    static let blue = Color(red: 0.27, green: 0.48, blue: 0.97)
+    static let cardBackground = Color(.systemBackground)
+    static let pageBackground = Color(red: 0.95, green: 0.96, blue: 0.98)
+    static let labelSecondary = Color(.secondaryLabel)
+    static let cardRadius: CGFloat = 20
+    static let innerRadius: CGFloat = 12
+}
+
+// MARK: - ContentView (TabView root)
+
 struct ContentView: View {
+    var body: some View {
+        TabView {
+            StreamTab()
+                .tabItem {
+                    Image(systemName: "video.fill")
+                    Text("Stream")
+                }
+
+            InfoTab()
+                .tabItem {
+                    Image(systemName: "info.circle.fill")
+                    Text("Info")
+                }
+        }
+        .tint(Theme.blue)
+    }
+}
+
+// MARK: - Stream Tab
+
+private struct StreamTab: View {
     @State private var streamURL: String = SharedConfig.streamURL
     @State private var videoBitrate: Double = Double(SharedConfig.videoBitrateMbps)
     @State private var selectedFps: Int = SharedConfig.fps
 
-    private var detectedProtocol: StreamProtocol {
-        StreamProtocol(url: streamURL)
-    }
-
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(.systemBackground), Color(.secondarySystemBackground)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Theme.pageBackground.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 32) {
-                    // Header
-                    VStack(spacing: 8) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 48, weight: .light))
-                            .foregroundStyle(.tint)
-
-                        Text("ScreenCaster")
-                            .font(.largeTitle.bold())
-
-                        Text("Stream your screen via \(detectedProtocol.label)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 40)
-
-                    // Stream URL input
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Stream Server", systemImage: "link")
-                            .font(.headline)
-
-                        TextField("rtmp:// or http:// URL", text: $streamURL)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .padding()
-                            .background(.ultraThinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .onChange(of: streamURL, perform: { newValue in
-                                SharedConfig.streamURL = newValue
-                            })
-
-                        Text(protocolHint)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal)
-
-                    // Video bitrate slider
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Video Bitrate", systemImage: "arrow.up.circle")
-                            .font(.headline)
-
-                        HStack {
-                            Text("1")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Slider(value: $videoBitrate, in: 1...15, step: 1)
-                                .onChange(of: videoBitrate) { newValue in
-                                    SharedConfig.videoBitrateMbps = Int(newValue)
-                                }
-                            Text("15")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Text("\(Int(videoBitrate)) Mbps")
-                            .font(.subheadline.weight(.medium).monospacedDigit())
-                            .foregroundStyle(.tint)
-                    }
-                    .padding(.horizontal)
-
-                    // FPS picker
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Frame Rate", systemImage: "speedometer")
-                            .font(.headline)
-
-                        HStack(spacing: 8) {
-                            ForEach(SharedConfig.fpsOptions, id: \.self) { fps in
-                                Button {
-                                    selectedFps = fps
-                                    SharedConfig.fps = fps
-                                } label: {
-                                    Text("\(fps)")
-                                        .font(.subheadline.weight(.medium).monospacedDigit())
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(selectedFps == fps ? Color.accentColor : Color(.tertiarySystemFill))
-                                        .foregroundStyle(selectedFps == fps ? .white : .primary)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    // Broadcast button
-                    VStack(spacing: 12) {
-                        BroadcastPickerView()
-                            .frame(width: 120, height: 120)
-                            .background(
-                                ZStack {
-                                    Circle()
-                                        .fill(.tint.opacity(0.15))
-
-                                    Circle()
-                                        .fill(.tint)
-                                        .frame(width: 88, height: 88)
-                                        .shadow(color: .accentColor.opacity(0.4), radius: 12, y: 4)
-
-                                    Image(systemName: "record.circle")
-                                        .font(.system(size: 36, weight: .medium))
-                                        .foregroundStyle(.white)
-                                }
-                            )
-
-                        Text("Tap to Broadcast")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    // Stream info card
-                    VStack(spacing: 0) {
-                        InfoRow(icon: "globe", label: "Protocol", value: detectedProtocol.label)
-                        Divider().padding(.leading, 44)
-                        InfoRow(icon: "tv", label: "Resolution", value: "Device Native")
-                        Divider().padding(.leading, 44)
-                        InfoRow(icon: "speedometer", label: "FPS", value: "\(selectedFps)")
-                        Divider().padding(.leading, 44)
-                        InfoRow(icon: "arrow.up.circle", label: "Video Bitrate", value: "\(Int(videoBitrate)) Mbps")
-                        Divider().padding(.leading, 44)
-                        InfoRow(icon: "waveform", label: "Audio", value: audioLabel)
-                        Divider().padding(.leading, 44)
-                        InfoRow(icon: "cpu", label: "Codec", value: "H.264 High")
-                    }
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .padding(.horizontal)
-
-                    Spacer(minLength: 20)
+                VStack(spacing: 24) {
+                    topBar
+                    broadcastHero
+                    settingsCard
                 }
+                .padding(.bottom, 24)
             }
         }
     }
 
-    private var protocolHint: String {
-        switch detectedProtocol {
-        case .rtmp:
-            return "Using RTMP — rtmp:// detected"
-        case .whip:
-            return "Using WebRTC (WHIP) — http(s):// detected"
+    // MARK: Top Bar
+
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Text("SCREEN")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                Image(systemName: "play.rectangle.fill")
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(.darkGray))
+            )
+
+            Text("ScreenCaster")
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+    }
+
+    // MARK: Broadcast Hero
+
+    private var broadcastHero: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Theme.blue.opacity(0.18), Theme.blue.opacity(0.02)],
+                            center: .center,
+                            startRadius: 70,
+                            endRadius: 120
+                        )
+                    )
+                    .frame(width: 240, height: 240)
+
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.35, green: 0.58, blue: 1.0),
+                                Theme.blue,
+                                Color(red: 0.20, green: 0.38, blue: 0.88),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 180, height: 180)
+                    .shadow(color: Theme.blue.opacity(0.35), radius: 24, y: 8)
+
+                VStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 40, weight: .medium))
+                        .foregroundStyle(.white)
+                    Text("Start Broadcast")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.95))
+                }
+
+                BroadcastPickerView()
+                    .frame(width: 180, height: 180)
+                    .clipShape(Circle())
+            }
+
+            Text("Tap to begin capturing")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.labelSecondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: Settings Card
+
+    private var settingsCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            // Header
+            HStack {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Theme.blue)
+                Text("Streaming Settings")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                Spacer()
+                Button("Reset") {
+                    streamURL = SharedConfig.defaultStreamURL
+                    SharedConfig.streamURL = SharedConfig.defaultStreamURL
+                    videoBitrate = Double(SharedConfig.defaultVideoBitrateMbps)
+                    SharedConfig.videoBitrateMbps = SharedConfig.defaultVideoBitrateMbps
+                    selectedFps = SharedConfig.defaultFps
+                    SharedConfig.fps = SharedConfig.defaultFps
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.blue)
+            }
+
+            // URL
+            VStack(alignment: .leading, spacing: 6) {
+                Text("URL")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.labelSecondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "link")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.labelSecondary)
+
+                    TextField("rtmp:// or http:// URL", text: $streamURL)
+                        .font(.system(size: 15))
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: streamURL) { newValue in
+                            SharedConfig.streamURL = newValue
+                        }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.innerRadius, style: .continuous)
+                        .fill(Color(.tertiarySystemFill))
+                )
+            }
+
+            // Bitrate
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("BITRATE")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.labelSecondary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                    Spacer()
+                    Text("\(Int(videoBitrate)) Mbps")
+                        .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Theme.blue)
+                }
+
+                Slider(value: $videoBitrate, in: 1...15, step: 1)
+                    .tint(Theme.blue)
+                    .onChange(of: videoBitrate) { newValue in
+                        SharedConfig.videoBitrateMbps = Int(newValue)
+                    }
+            }
+
+            // FPS
+            VStack(alignment: .leading, spacing: 8) {
+                Text("FPS")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.labelSecondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+
+                HStack(spacing: 6) {
+                    ForEach(SharedConfig.fpsOptions, id: \.self) { fps in
+                        Button {
+                            selectedFps = fps
+                            SharedConfig.fps = fps
+                        } label: {
+                            Text("\(fps)")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                                .frame(width: 44, height: 36)
+                                .background(
+                                    Capsule()
+                                        .fill(selectedFps == fps ? Theme.blue : Color(.tertiarySystemFill))
+                                )
+                                .foregroundStyle(selectedFps == fps ? .white : .primary)
+                        }
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(Theme.cardBackground)
+                .shadow(color: .black.opacity(0.06), radius: 16, y: 4)
+        )
+        .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - Info Tab
+
+private struct InfoTab: View {
+    private var detectedProtocol: StreamProtocol {
+        StreamProtocol(url: SharedConfig.streamURL)
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.pageBackground.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.blue)
+                    Text("Stream Info")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 20)
+
+                // Info card
+                VStack(spacing: 0) {
+                    InfoRow(icon: "globe", label: "Protocol", value: detectedProtocol.label)
+                    Divider().padding(.leading, 56)
+                    InfoRow(icon: "tv", label: "Resolution", value: "Device Native")
+                    Divider().padding(.leading, 56)
+                    InfoRow(icon: "speedometer", label: "FPS", value: "\(SharedConfig.fps)")
+                    Divider().padding(.leading, 56)
+                    InfoRow(icon: "arrow.up.circle", label: "Video Bitrate", value: "\(SharedConfig.videoBitrateMbps) Mbps")
+                    Divider().padding(.leading, 56)
+                    InfoRow(icon: "waveform", label: "Audio", value: audioLabel)
+                    Divider().padding(.leading, 56)
+                    InfoRow(icon: "cpu", label: "Codec", value: "H.264 High")
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .fill(Theme.cardBackground)
+                        .shadow(color: .black.opacity(0.06), radius: 16, y: 4)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                .padding(.horizontal, 16)
+
+                Spacer()
+            }
         }
     }
 
     private var audioLabel: String {
         switch detectedProtocol {
-        case .rtmp:
-            return "AAC 192 kbps"
-        case .whip:
-            return "Opus 128 kbps"
+        case .rtmp: return "AAC 192 kbps"
+        case .whip: return "Opus 128 kbps"
         }
     }
 }
+
+// MARK: - InfoRow
 
 private struct InfoRow: View {
     let icon: String
@@ -179,19 +314,21 @@ private struct InfoRow: View {
     let value: String
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .frame(width: 28)
-                .foregroundStyle(.tint)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.blue)
+                .frame(width: 24)
             Text(label)
+                .font(.system(size: 15))
                 .foregroundStyle(.primary)
             Spacer()
             Text(value)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.labelSecondary)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 13)
     }
 }
 
