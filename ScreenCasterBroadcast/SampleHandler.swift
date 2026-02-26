@@ -20,6 +20,9 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private var landscapeSize: CGSize = .zero
     private var proto: StreamProtocol = .rtmp
 
+    // Frame rate throttle
+    private var frameThrottle = FrameThrottle()
+
     // Diagnostics
     private var lastLoggedSize: CGSize = .zero
     private var frameCount: Int = 0
@@ -91,6 +94,12 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
         switch sampleBufferType {
         case .video:
+            // Frame rate throttle: drop frames that arrive too soon
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            if !frameThrottle.shouldAccept(pts: pts, fps: SharedConfig.fps) {
+                return
+            }
+
             let orientation = Self.orientation(from: sampleBuffer)
 
             // Diagnostic: log pixel buffer dimensions periodically and on change
