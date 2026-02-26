@@ -145,37 +145,32 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     }
 
     /// Processes a video frame for the landscape output canvas.
-    /// - Portrait (.up): scales and centers with black pillarbox bars.
-    /// - Landscape (.left/.right): rotates to correct orientation.
+    /// Step 1: Rotate content upright via VideoFrameProcessor.
+    /// Step 2: Aspect-fit and center if dimensions don't match the canvas.
     private func processedVideoBuffer(
         _ sampleBuffer: CMSampleBuffer,
         orientation: CGImagePropertyOrientation
     ) -> CMSampleBuffer? {
         guard let pixelBuffer = sampleBuffer.imageBuffer, landscapeSize != .zero else { return nil }
 
-        let ciImage: CIImage
+        let src = CIImage(cvPixelBuffer: pixelBuffer)
+        let w = src.extent.width
+        let h = src.extent.height
 
-        if orientation == .up {
-            // Portrait: scale to fit landscape height, center with black bars
-            let src = CIImage(cvPixelBuffer: pixelBuffer)
-            let scale = landscapeSize.height / src.extent.height
-            var scaled = src.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            let offsetX = (landscapeSize.width - scaled.extent.width) / 2
-            scaled = scaled.transformed(by: CGAffineTransform(translationX: offsetX, y: 0))
-            let black = CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: landscapeSize))
-            ciImage = scaled.composited(over: black)
+        // Step 1: Rotate content upright based on device orientation.
+        let uprightT = VideoFrameProcessor.uprightTransform(
+            for: orientation, sourceWidth: w, sourceHeight: h
+        )
+        let upright = uprightT.isIdentity ? src : src.transformed(by: uprightT)
+
+        // Step 2: Aspect-fit and center if content doesn't match the canvas.
+        let ciImage: CIImage
+        if let fitT = VideoFrameProcessor.fitTransform(
+            contentSize: upright.extent.size, canvasSize: landscapeSize
+        ) {
+            ciImage = upright.transformed(by: fitT)
         } else {
-            // Landscape: rotate. Swap left/right because oriented() converts TO .up,
-            // but we want landscape output.
-            let corrected: CGImagePropertyOrientation
-            switch orientation {
-            case .left:  corrected = .right
-            case .right: corrected = .left
-            default:     corrected = orientation
-            }
-            var img = CIImage(cvPixelBuffer: pixelBuffer)
-            img = img.oriented(corrected)
-            ciImage = img
+            ciImage = upright
         }
 
         return renderToSampleBuffer(ciImage, targetSize: landscapeSize, timingSource: sampleBuffer)
@@ -212,12 +207,14 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &outputBuffer)
         guard status == kCVReturnSuccess, let outputBuffer else { return nil }
 
-        // Normalize extent origin to (0,0) before rendering
-        let normalized = ciImage.transformed(
-            by: CGAffineTransform(translationX: -ciImage.extent.origin.x,
-                                  y: -ciImage.extent.origin.y)
-        )
-        ciContext.render(normalized, to: outputBuffer)
+        // Clear buffer to black — prevents stale pixel artifacts from pool recycling
+        CVPixelBufferLockBaseAddress(outputBuffer, [])
+        if let base = CVPixelBufferGetBaseAddress(outputBuffer) {
+            memset(base, 0, CVPixelBufferGetBytesPerRow(outputBuffer) * outHeight)
+        }
+        CVPixelBufferUnlockBaseAddress(outputBuffer, [])
+
+        ciContext.render(ciImage, to: outputBuffer)
 
         // Wrap in a new CMSampleBuffer with original timing
         var timingInfo = CMSampleTimingInfo()
