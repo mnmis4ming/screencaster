@@ -1,9 +1,12 @@
 import CoreImage
 import HaishinKit
+import os
 import ReplayKit
 import RTCHaishinKit
 import RTMPHaishinKit
 import VideoToolbox
+
+private let log = Logger(subsystem: "com.dayouxia.ScreenCaster.Broadcast", category: "SampleHandler")
 
 final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private var session: (any Session)?
@@ -17,6 +20,10 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private var landscapeSize: CGSize = .zero
     private var proto: StreamProtocol = .rtmp
 
+    // Diagnostics
+    private var lastLoggedSize: CGSize = .zero
+    private var frameCount: Int = 0
+
     override init() {
         super.init()
         Task {
@@ -28,6 +35,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         let url = SharedConfig.streamURL
         proto = SharedConfig.streamProtocol
+        log.info("🚀 Broadcast starting — url=\(url), proto=\(self.proto.label), bitrate=\(SharedConfig.videoBitrateMbps)Mbps, fps=\(SharedConfig.fps)")
         Task {
             do {
                 guard let streamURL = URL(string: url) else {
@@ -84,6 +92,19 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         switch sampleBufferType {
         case .video:
             let orientation = Self.orientation(from: sampleBuffer)
+
+            // Diagnostic: log pixel buffer dimensions periodically and on change
+            if let pb = sampleBuffer.imageBuffer {
+                let w = CVPixelBufferGetWidth(pb)
+                let h = CVPixelBufferGetHeight(pb)
+                let sz = CGSize(width: CGFloat(w), height: CGFloat(h))
+                frameCount += 1
+                if sz != lastLoggedSize || frameCount % 60 == 0 {
+                    let changed = sz != lastLoggedSize ? " [CHANGED]" : ""
+                    lastLoggedSize = sz
+                    log.info("📐 #\(self.frameCount): \(w)×\(h) orientation=\(orientation.rawValue)\(changed)")
+                }
+            }
 
             // Configure encoder once — always use landscape dimensions
             if !encoderConfigured, let dimensions = sampleBuffer.formatDescription?.dimensions {
